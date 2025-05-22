@@ -8,7 +8,7 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
 
 setup(
     name="dash-bgmgr-redis",
-    version="0.1.1",
+    version="0.2.0",
     author="Razgriz Hsu",
     author_email="dev@raz.tw",
     description="Redis-based background callback manager for Dash applications",

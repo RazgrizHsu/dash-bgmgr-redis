@@ -4,7 +4,8 @@ from typing import Any, Optional
 import traceback
 from contextvars import copy_context
 
-from dash.long_callback.managers import BaseLongCallbackManager
+from dash.background_callback.managers import BaseBackgroundCallbackManager
+from dash.background_callback._proxy_set_props import ProxySetProps
 from dash._callback_context import context_value
 from dash._utils import AttributeDict
 from dash.exceptions import PreventUpdate
@@ -105,7 +106,7 @@ class RedisCache:
         self.close()
 
 
-class RedisBgManager(BaseLongCallbackManager):
+class RedisBgManager(BaseBackgroundCallbackManager):
     """Redis-based background callback manager for dash background_callback_manager usage"""
 
     UNDEFINED = object()
@@ -216,7 +217,6 @@ class RedisBgManager(BaseLongCallbackManager):
         result = self.handle.get(key, self.UNDEFINED)
         if result is self.UNDEFINED: return self.UNDEFINED
 
-        # Clear result if not in cache mode
         if self.cache_by is None: self.clear_cache_entry(key)
         else:
             if self.expire: self.handle.touch(key, expire=self.expire)
@@ -227,54 +227,18 @@ class RedisBgManager(BaseLongCallbackManager):
             self.terminate_job(job)
         return result
 
-    def build_cache_key(self, fn, args, cache_args_to_ignore):
-        import inspect
-        import hashlib
+    def get_updated_props(self, key):
+        set_props_key = self._make_set_props_key(key)
+        result = self.handle.get(set_props_key, self.UNDEFINED)
+        if result is self.UNDEFINED: return {}
 
-        fn_source = inspect.getsource(fn)
+        self.clear_cache_entry(set_props_key)
 
-        if not isinstance(cache_args_to_ignore, (list, tuple)):
-            cache_args_to_ignore = [cache_args_to_ignore]
+        return result
 
-        if cache_args_to_ignore:
-            if isinstance(args, dict):
-                args = {k: v for k, v in args.items() if k not in cache_args_to_ignore}
-            else:
-                args = [arg for i, arg in enumerate(args) if i not in cache_args_to_ignore]
-
-        hash_dict = dict(args=args, fn_source=fn_source)
-
-        if self.cache_by is not None:
-            for i, cache_item in enumerate(self.cache_by):
-                hash_dict[f"cache_key_{i}"] = cache_item()
-
-        return hashlib.sha1(str(hash_dict).encode("utf-8")).hexdigest()
 
     def register(self, key, fn, progress):
         self.func_registry[key] = self.make_job_fn(fn, progress, key)
-
-    @staticmethod
-    def register_func(fn, progress, callback_id):
-        key = RedisBgManager.hash_function(fn, callback_id)
-        BaseLongCallbackManager.functions.append((key, fn, progress,))
-
-        for manager in BaseLongCallbackManager.managers:
-            manager.register(key, fn, progress)
-
-        return key
-
-    @staticmethod
-    def _make_progress_key(key):
-        return key + "-progress"
-
-    @staticmethod
-    def hash_function(fn, cbid=""):
-        import inspect
-        import hashlib
-
-        fn_source = inspect.getsource(fn)
-        fn_str = fn_source
-        return hashlib.sha1(cbid.encode("utf-8") + fn_str.encode("utf-8")).hexdigest()
 
 
 def _make_job_fn(fn, cache, progress):
@@ -287,13 +251,18 @@ def _make_job_fn(fn, cache, progress):
 
         maybe_progress = [_set_progress] if progress else []
 
+        def _set_props(_id, props):
+            cache.set(f"{result_key}-set_props", {_id: props})
+
         ctx = copy_context()
 
         def run():
             c = AttributeDict(**context)
             c.ignore_register_page = False
+            c.updated_props = ProxySetProps(_set_props)
             context_value.set(c)
-
+            errored = False
+            user_callback_output = None
             try:
                 if isinstance(user_callback_args, dict):
                     user_callback_output = fn(*maybe_progress, **user_callback_args)
@@ -302,18 +271,21 @@ def _make_job_fn(fn, cache, progress):
                 else:
                     user_callback_output = fn(*maybe_progress, user_callback_args)
             except PreventUpdate:
+                errored = True
                 cache.set(result_key, {"_dash_no_update": "_dash_no_update"})
             except Exception as err:
+                errored = True
                 cache.set(
                     result_key,
                     {
-                        "long_callback_error": {
+                        "background_callback_error": {
                             "msg": str(err),
                             "tb": traceback.format_exc(),
                         }
                     },
                 )
-            else:
+
+            if not errored:
                 cache.set(result_key, user_callback_output)
 
         ctx.run(run)
@@ -321,9 +293,13 @@ def _make_job_fn(fn, cache, progress):
     return job_fn
 
 
-
 def NewRedisBgManager(redisUrl=None, prefix='app:', expire=3600, cacheBy=None, **kwargs):
     if redisUrl is None: raise ValueError("redisUrl is required")
 
     resc = RedisCache(redisUrl, prefix, expire, **kwargs)
+    try:
+        resc.redis.ping()
+    except Exception as e:
+        raise ConnectionError(f"Failed to connect to Redis url[{redisUrl}]: {e}")
+
     return RedisBgManager(resc, cacheBy=cacheBy, expire=expire)

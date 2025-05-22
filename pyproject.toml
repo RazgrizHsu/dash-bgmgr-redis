@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dash-bgmgr-redis"
-version = "0.1.1"
+version = "0.2.0"
 authors = [
     {name = "Razgriz Hsu", email = "dev@raz.tw"},
 ]
@@ -26,8 +26,8 @@ classifiers = [
 ]
 keywords = ["dash", "redis", "background", "callback", "manager"]
 dependencies = [
-    "dash>=2.0.0,<3.0.0",
-    "redis>=4.0.0",
+    "dash>=3.0.0,<4.0.0",
+    "redis>=5.0.0",
     "psutil>=5.0.0",
     "multiprocess>=0.70.0",
 ]

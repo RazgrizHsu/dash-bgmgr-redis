@@ -2,6 +2,11 @@
 
 Redis-based background callback manager for Dash applications.
 
+## Version Compatibility
+
+- **Version 0.1.x**: Compatible with Dash 2.x (2.0.0 <= dash < 3.0.0)
+- **Version 0.2.x**: Compatible with Dash 3.x (dash >= 3.0.0)
+
 ## Installation
 
 ```bash
@@ -37,7 +42,7 @@ app = dash.Dash(__name__, background_callback_manager=bg_mgr)
 ## Requirements
 
 - Python 3.7+
-- dash>=2.0.0
+- dash>=3.0.0,<4.0.0
 - redis>=4.0.0
 - psutil>=5.0.0
 - multiprocess>=0.70.0
